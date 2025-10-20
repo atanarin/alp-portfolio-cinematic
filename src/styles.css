@@ -1,0 +1,23 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root { --ring: 124 108 255; }
+.glass {
+  @apply rounded-2xl border border-white/10 bg-white/5 backdrop-blur-xl shadow-soft;
+}
+.glass-strong {
+  @apply rounded-2xl border border-white/10 bg-white/10 backdrop-blur-2xl shadow-soft;
+}
+.hover-card { @apply transition-transform duration-200 hover:-translate-y-1 hover:shadow-glow; }
+
+.bg-cinematic {
+  @apply relative;
+  background-image: theme('backgroundImage.radial-fade');
+}
+.bg-grid {
+  background-image: theme('backgroundImage.grid');
+  background-size: 24px 24px;
+  mask-image: radial-gradient(closest-side, black 60%, transparent);
+  opacity: .25;
+}
