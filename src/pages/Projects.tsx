@@ -8,7 +8,7 @@ const current = [
     description:
       'Real-time dashboard using Flask + MySQL backend, SSE for live updates, React front-end, and cache-aside with Redis.',
     tags: ['React', 'Flask', 'MySQL', 'SSE', 'Redis', 'Docker'],
-    github: 'https://github.com/alpatanarin',
+    github: 'https://github.com/atanarin',
     status: 'current',
     highlight: 'Reduced TTFB under load with caching + connection pooling.',
   },
