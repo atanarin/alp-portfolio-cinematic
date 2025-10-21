@@ -11,7 +11,7 @@ export default function Home() {
           transition={{ duration: 0.4 }}
           className="text-4xl sm:text-5xl font-extrabold tracking-tight"
         >
-          Alp builds cinematic, performant software.
+          Hi, I'm Alp. I build professional software.
         </motion.h1>
         <motion.p
           initial={{ opacity: 0, y: 8 }}

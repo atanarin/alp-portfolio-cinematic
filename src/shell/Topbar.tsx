@@ -16,7 +16,7 @@ export default function Topbar() {
           >
             <Command size={16} /> <span className="hidden sm:inline">Command</span> <kbd className="ml-1 rounded bg-black/50 px-1">⌘K</kbd>
           </button>
-          <a href="https://github.com/alpatanarin" target="_blank" className="rounded-xl border border-white/10 bg-white/5 p-2 hover:shadow-glow" aria-label="GitHub"><Github size={16} /></a>
+          <a href="https://github.com/atanarin" target="_blank" className="rounded-xl border border-white/10 bg-white/5 p-2 hover:shadow-glow" aria-label="GitHub"><Github size={16} /></a>
           <a href="https://www.linkedin.com/in/alpatanarin" target="_blank" className="rounded-xl border border-white/10 bg-white/5 p-2 hover:shadow-glow" aria-label="LinkedIn"><Linkedin size={16} /></a>
         </div>
       </div>

@@ -20,7 +20,7 @@ const past = [
     description:
       'Reproducible pipeline for evolutionary rate analysis across Saccharomyces proteomes using PAML & Tranalign.',
     tags: ['Python', 'PAML', 'Bioinformatics', 'HPC'],
-    github: 'https://github.com/alpatanarin',
+    github: 'https://github.com/atanarin',
     status: 'past',
   },
   {
@@ -28,7 +28,7 @@ const past = [
     description:
       'FastAPI + SQLAlchemy + Redis demo with TTLs, invalidation, and stampede protection (advisory locks).',
     tags: ['FastAPI', 'Redis', 'SQLAlchemy'],
-    github: 'https://github.com/alpatanarin',
+    github: 'https://github.com/atanarin',
     status: 'past',
   },
 ] satisfies Project[]   // ← keeps 'past' as a literal type
