@@ -1,8 +1,9 @@
-import { Outlet, NavLink, useLocation } from 'react-router-dom'
+import { Outlet, useLocation } from 'react-router-dom'
 import Rail from './Rail'
 import Topbar from './Topbar'
 import CommandPalette from './CommandPalette'
 import { AnimatePresence, motion } from 'framer-motion'
+import ChatWidget from '@/components/ChatWidget'
 
 export default function Layout() {
   const location = useLocation()
@@ -30,7 +31,9 @@ export default function Layout() {
         </AnimatePresence>
       </div>
 
+      {/* Global overlays/widgets */}
       <CommandPalette />
+      <ChatWidget />
     </div>
   )
 }
