@@ -22,6 +22,7 @@
     "@types/node": "^24.9.1",
     "@types/react": "^18.3.5",
     "@types/react-dom": "^18.3.0",
+    "@vercel/node": "^2.15.10",
     "@vitejs/plugin-react-swc": "^3.7.1",
     "autoprefixer": "^10.4.20",
     "postcss": "^8.4.47",
