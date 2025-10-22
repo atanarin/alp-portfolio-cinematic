@@ -14,7 +14,6 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE)
 const openai = new OpenAI({ apiKey: OPENAI_API_KEY })
 
 function chunkText(text: string, maxChars = 1800) {
-  // Simple char-based chunker; good enough for small docs
   const chunks: string[] = []
   for (let i = 0; i < text.length; i += maxChars) {
     chunks.push(text.slice(i, i + maxChars))

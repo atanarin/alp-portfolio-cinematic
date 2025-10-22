@@ -1,6 +1,6 @@
 import Section from '@/components/Section'
 import ProjectCard from '@/components/ProjectCard'
-import type { Project } from '@/components/ProjectCard'  // ← add this
+import type { Project } from '@/components/ProjectCard'  
 
 const current = [
   {
@@ -12,7 +12,7 @@ const current = [
     status: 'current',
     highlight: 'Reduced TTFB under load with caching + connection pooling.',
   },
-] satisfies Project[]   // ← keeps 'current' as a literal type
+] satisfies Project[]   // keeps current as a literal type
 
 const past = [
   {
@@ -31,7 +31,7 @@ const past = [
     github: 'https://github.com/atanarin',
     status: 'past',
   },
-] satisfies Project[]   // ← keeps 'past' as a literal type
+] satisfies Project[]   // keeps past as a literal type
 
 export default function Projects() {
   return (
