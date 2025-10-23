@@ -8,18 +8,14 @@ Be concise, specific, and helpful.`
 
 interface DocRow { id: string; source: string; chunk: string; similarity?: number }
 
-// Some PostgREST deployments serialize pgvector as a JSON string (e.g. "[0.1,0.2,...]").
-// This helper accepts array OR string and returns a number[].
 function toNumberArray(x: any): number[] | null {
   if (Array.isArray(x)) return x as number[]
   if (typeof x === 'string') {
     const s = x.trim()
     try {
       if (s.startsWith('[') && s.endsWith(']')) return JSON.parse(s) as number[]
-      if (s.startsWith('(') && s.endsWith(')')) {
-        return s.slice(1, -1).split(',').map(v => Number(v.trim()))
-      }
-    } catch { /* ignore parse errors */ }
+      if (s.startsWith('(') && s.endsWith(')')) return s.slice(1, -1).split(',').map(v => Number(v.trim()))
+    } catch {}
   }
   return null
 }
@@ -45,33 +41,36 @@ export default async function handler(req: any, res: any) {
     const head = await supabase.from('documents').select('id', { count: 'exact', head: true })
     const docCount = head.count ?? 0
 
-    // Fetch one stored embedding to compare dimensions + probe RPC
+    // Read one stored embedding to verify parsing + probe
     const one = await supabase.from('documents').select('id, source, embedding').limit(1)
-    const embArr = toNumberArray(one.data?.[0]?.embedding)
-    const firstEmbLen = embArr ? embArr.length : 0
+    const storedArr = toNumberArray(one.data?.[0]?.embedding)
+    const firstEmbLen = storedArr ? storedArr.length : 0
 
-    // Probe: call loose RPC with a stored embedding
+    // Probe: loose RPC with stored embedding (should return rows)
     let probeLooseRows = -1
-    if (embArr) {
+    if (storedArr) {
       const test = await supabase.rpc('match_documents_loose', {
-        query_embedding: embArr,   // NOTE: pass parsed number[]
+        query_embedding: storedArr,      // number[] known-good
         match_count: 3,
       })
       probeLooseRows = Array.isArray(test.data) ? test.data.length : -3
     } else {
-      probeLooseRows = -2 // couldn't read/parse a stored embedding
+      probeLooseRows = -2
     }
 
     // 1) Embed the question
     const e = await openai.embeddings.create({ model: EMBEDDING_MODEL, input: question })
-    const qvec = e.data[0].embedding
-    const qLen = qvec?.length ?? 0
+    // Normalize to a plain number[]
+    const qvecRaw = e.data[0].embedding
+    const qvec: number[] = Array.isArray(qvecRaw) ? qvecRaw.map(Number) : Array.from(qvecRaw as unknown as number[])
+    const qLen = qvec.length
+    const qStr = JSON.stringify(qvec) // string fallback
 
     // 2) Retrieval
     let rows: DocRow[] = []
-    let used: 'threshold' | 'loose' | 'none' = 'none'
+    let used: 'threshold' | 'loose' | 'loose_str' | 'threshold_str' | 'none' = 'none'
 
-    // thresholded first
+    // Try array → thresholded
     {
       const { data, error } = await supabase.rpc('match_documents', {
         query_embedding: qvec,
@@ -82,14 +81,14 @@ export default async function handler(req: any, res: any) {
         return res.status(500).json({
           error: 'Search failed',
           details: error.message,
-          diag: { supabaseUrl, docCount, qLen, firstEmbLen, probeLooseRows }
+          diag: { supabaseUrl, docCount, qLen, firstEmbLen, probeLooseRows, mode: 'threshold_array' }
         })
       }
       if (Array.isArray(data)) rows = data as DocRow[]
       used = 'threshold'
     }
 
-    // fallback to loose
+    // Fallback: array → loose
     if (rows.length === 0) {
       const { data, error } = await supabase.rpc('match_documents_loose', {
         query_embedding: qvec,
@@ -99,11 +98,36 @@ export default async function handler(req: any, res: any) {
         return res.status(500).json({
           error: 'Loose search failed',
           details: error.message,
-          diag: { supabaseUrl, docCount, qLen, firstEmbLen, probeLooseRows }
+          diag: { supabaseUrl, docCount, qLen, firstEmbLen, probeLooseRows, mode: 'loose_array' }
         })
       }
       if (Array.isArray(data)) rows = data as DocRow[]
       used = 'loose'
+    }
+
+    // Fallback: string → loose (some PostgRESTs prefer a JSON string for vector)
+    if (rows.length === 0) {
+      const { data, error } = await supabase.rpc('match_documents_loose', {
+        query_embedding: qStr,            // <-- string form
+        match_count: 10,
+      })
+      if (!error && Array.isArray(data) && data.length > 0) {
+        rows = data as DocRow[]
+        used = 'loose_str'
+      }
+    }
+
+    // Fallback: string → threshold
+    if (rows.length === 0) {
+      const { data, error } = await supabase.rpc('match_documents', {
+        query_embedding: qStr,            // <-- string form
+        match_count: 8,
+        sim_threshold: 0.45,
+      })
+      if (!error && Array.isArray(data) && data.length > 0) {
+        rows = data as DocRow[]
+        used = 'threshold_str'
+      }
     }
 
     if (rows.length === 0) {
@@ -127,7 +151,6 @@ export default async function handler(req: any, res: any) {
     })
 
     const answer = chat.choices?.[0]?.message?.content ?? 'Sorry, I could not generate a response.'
-
     return res.status(200).json({
       answer,
       sources: rows.map(r => r.source),
