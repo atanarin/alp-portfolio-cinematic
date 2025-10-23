@@ -73,8 +73,8 @@ export default async function handler(req: any, res: any) {
     {
       const { data, error } = await supabase.rpc('match_documents_arr', {
         query_embedding: qvec,   // plain number[]
-        match_count: 8,
-        sim_threshold: 0.45,
+        match_count: 10,
+        sim_threshold: 0.2,
       })
       if (error) {
         return res.status(500).json({
