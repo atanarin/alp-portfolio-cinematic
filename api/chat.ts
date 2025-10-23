@@ -25,30 +25,30 @@ export default async function handler(req: any, res: any) {
     const EMBEDDING_MODEL = process.env.EMBEDDING_MODEL || 'text-embedding-3-small'
     const CHAT_MODEL = process.env.CHAT_MODEL || 'gpt-4o-mini'
 
-    // Head count (RLS-aware)
+    // RLS-aware head count
     const head = await supabase.from('documents').select('id', { count: 'exact', head: true })
     const docCount = head.count ?? 0
 
-    // --- PROBE: try to fetch one embedding & call loose RPC with it
+    // Fetch one stored embedding to compare dimensions + probe RPC
+    const one = await supabase.from('documents').select('id, source, embedding').limit(1)
+    const firstEmb = one.data?.[0]?.embedding as number[] | undefined
+    const firstEmbLen = Array.isArray(firstEmb) ? firstEmb.length : 0
+
     let probeLooseRows = -1
-    try {
-      const one = await supabase.from('documents').select('embedding').limit(1)
-      if (one.data?.[0]?.embedding) {
-        const test = await supabase.rpc('match_documents_loose', {
-          query_embedding: one.data[0].embedding,
-          match_count: 3,
-        })
-        if (Array.isArray(test.data)) probeLooseRows = test.data.length
-      } else {
-        probeLooseRows = -2 // no rows returned by select
-      }
-    } catch (e) {
-      probeLooseRows = -3 // probe error
+    if (firstEmbLen > 0) {
+      const test = await supabase.rpc('match_documents_loose', {
+        query_embedding: firstEmb,
+        match_count: 3,
+      })
+      probeLooseRows = Array.isArray(test.data) ? test.data.length : -3
+    } else {
+      probeLooseRows = -2
     }
 
     // 1) Embed the question
     const e = await openai.embeddings.create({ model: EMBEDDING_MODEL, input: question })
     const qvec = e.data[0].embedding
+    const qLen = qvec?.length ?? 0
 
     // 2) Retrieval
     let rows: DocRow[] = []
@@ -61,7 +61,13 @@ export default async function handler(req: any, res: any) {
         match_count: 8,
         sim_threshold: 0.45,
       })
-      if (error) return res.status(500).json({ error: 'Search failed', details: error.message, diag: { supabaseUrl, docCount, probeLooseRows } })
+      if (error) {
+        return res.status(500).json({
+          error: 'Search failed',
+          details: error.message,
+          diag: { supabaseUrl, docCount, qLen, firstEmbLen, probeLooseRows }
+        })
+      }
       if (Array.isArray(data)) rows = data as DocRow[]
       used = 'threshold'
     }
@@ -72,7 +78,13 @@ export default async function handler(req: any, res: any) {
         query_embedding: qvec,
         match_count: 10,
       })
-      if (error) return res.status(500).json({ error: 'Loose search failed', details: error.message, diag: { supabaseUrl, docCount, probeLooseRows } })
+      if (error) {
+        return res.status(500).json({
+          error: 'Loose search failed',
+          details: error.message,
+          diag: { supabaseUrl, docCount, qLen, firstEmbLen, probeLooseRows }
+        })
+      }
       if (Array.isArray(data)) rows = data as DocRow[]
       used = 'loose'
     }
@@ -81,7 +93,7 @@ export default async function handler(req: any, res: any) {
       return res.status(200).json({
         answer: 'No matching documents found in my knowledge base yet.',
         sources: [],
-        diag: { supabaseUrl, docCount, used, rowsLen: 0, probeLooseRows }
+        diag: { supabaseUrl, docCount, used, rowsLen: 0, qLen, firstEmbLen, model: EMBEDDING_MODEL, probeLooseRows }
       })
     }
 
@@ -102,7 +114,7 @@ export default async function handler(req: any, res: any) {
     return res.status(200).json({
       answer,
       sources: rows.map(r => r.source),
-      diag: { supabaseUrl, docCount, used, rowsLen: rows.length, probeLooseRows }
+      diag: { supabaseUrl, docCount, used, rowsLen: rows.length, qLen, firstEmbLen, model: EMBEDDING_MODEL, probeLooseRows }
     })
   } catch (err: any) {
     return res.status(500).json({ error: 'Unhandled error', details: err?.message ?? String(err) })
