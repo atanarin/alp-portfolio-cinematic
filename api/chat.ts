@@ -8,6 +8,22 @@ Be concise, specific, and helpful.`
 
 interface DocRow { id: string; source: string; chunk: string; similarity?: number }
 
+// Some PostgREST deployments serialize pgvector as a JSON string (e.g. "[0.1,0.2,...]").
+// This helper accepts array OR string and returns a number[].
+function toNumberArray(x: any): number[] | null {
+  if (Array.isArray(x)) return x as number[]
+  if (typeof x === 'string') {
+    const s = x.trim()
+    try {
+      if (s.startsWith('[') && s.endsWith(']')) return JSON.parse(s) as number[]
+      if (s.startsWith('(') && s.endsWith(')')) {
+        return s.slice(1, -1).split(',').map(v => Number(v.trim()))
+      }
+    } catch { /* ignore parse errors */ }
+  }
+  return null
+}
+
 export default async function handler(req: any, res: any) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method Not Allowed' })
 
@@ -31,18 +47,19 @@ export default async function handler(req: any, res: any) {
 
     // Fetch one stored embedding to compare dimensions + probe RPC
     const one = await supabase.from('documents').select('id, source, embedding').limit(1)
-    const firstEmb = one.data?.[0]?.embedding as number[] | undefined
-    const firstEmbLen = Array.isArray(firstEmb) ? firstEmb.length : 0
+    const embArr = toNumberArray(one.data?.[0]?.embedding)
+    const firstEmbLen = embArr ? embArr.length : 0
 
+    // Probe: call loose RPC with a stored embedding
     let probeLooseRows = -1
-    if (firstEmbLen > 0) {
+    if (embArr) {
       const test = await supabase.rpc('match_documents_loose', {
-        query_embedding: firstEmb,
+        query_embedding: embArr,   // NOTE: pass parsed number[]
         match_count: 3,
       })
       probeLooseRows = Array.isArray(test.data) ? test.data.length : -3
     } else {
-      probeLooseRows = -2
+      probeLooseRows = -2 // couldn't read/parse a stored embedding
     }
 
     // 1) Embed the question
