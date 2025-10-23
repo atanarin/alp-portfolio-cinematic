@@ -28,6 +28,7 @@ export default async function handler(req: any, res: any) {
   }
 
   try {
+    console.log('Using Supabase:', process.env.SUPABASE_URL)
     const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body
     const question: string = body?.question?.trim?.()
     if (!question) {
