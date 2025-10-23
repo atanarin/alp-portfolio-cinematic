@@ -19,16 +19,32 @@ export default async function handler(req: any, res: any) {
     const question: string = body?.question?.trim?.()
     if (!question) return res.status(400).json({ error: 'Missing question' })
 
-    // --- DIAG: show which project we're hitting and whether we can read any rows as anon
     const supabaseUrl = process.env.SUPABASE_URL!
     const supabase = createClient(supabaseUrl, process.env.SUPABASE_ANON_KEY!)
     const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY! })
     const EMBEDDING_MODEL = process.env.EMBEDDING_MODEL || 'text-embedding-3-small'
     const CHAT_MODEL = process.env.CHAT_MODEL || 'gpt-4o-mini'
 
-    // fast head-count
+    // Head count (RLS-aware)
     const head = await supabase.from('documents').select('id', { count: 'exact', head: true })
     const docCount = head.count ?? 0
+
+    // --- PROBE: try to fetch one embedding & call loose RPC with it
+    let probeLooseRows = -1
+    try {
+      const one = await supabase.from('documents').select('embedding').limit(1)
+      if (one.data?.[0]?.embedding) {
+        const test = await supabase.rpc('match_documents_loose', {
+          query_embedding: one.data[0].embedding,
+          match_count: 3,
+        })
+        if (Array.isArray(test.data)) probeLooseRows = test.data.length
+      } else {
+        probeLooseRows = -2 // no rows returned by select
+      }
+    } catch (e) {
+      probeLooseRows = -3 // probe error
+    }
 
     // 1) Embed the question
     const e = await openai.embeddings.create({ model: EMBEDDING_MODEL, input: question })
@@ -38,25 +54,25 @@ export default async function handler(req: any, res: any) {
     let rows: DocRow[] = []
     let used: 'threshold' | 'loose' | 'none' = 'none'
 
-    // try thresholded first
+    // thresholded first
     {
       const { data, error } = await supabase.rpc('match_documents', {
         query_embedding: qvec,
         match_count: 8,
         sim_threshold: 0.45,
       })
-      if (error) return res.status(500).json({ error: 'Search failed', details: error.message, diag: { supabaseUrl, docCount } })
+      if (error) return res.status(500).json({ error: 'Search failed', details: error.message, diag: { supabaseUrl, docCount, probeLooseRows } })
       if (Array.isArray(data)) rows = data as DocRow[]
       used = 'threshold'
     }
 
-    // fallback to loose if empty
+    // fallback to loose
     if (rows.length === 0) {
       const { data, error } = await supabase.rpc('match_documents_loose', {
         query_embedding: qvec,
         match_count: 10,
       })
-      if (error) return res.status(500).json({ error: 'Loose search failed', details: error.message, diag: { supabaseUrl, docCount } })
+      if (error) return res.status(500).json({ error: 'Loose search failed', details: error.message, diag: { supabaseUrl, docCount, probeLooseRows } })
       if (Array.isArray(data)) rows = data as DocRow[]
       used = 'loose'
     }
@@ -65,7 +81,7 @@ export default async function handler(req: any, res: any) {
       return res.status(200).json({
         answer: 'No matching documents found in my knowledge base yet.',
         sources: [],
-        diag: { supabaseUrl, docCount, used, rowsLen: 0 }
+        diag: { supabaseUrl, docCount, used, rowsLen: 0, probeLooseRows }
       })
     }
 
@@ -82,10 +98,11 @@ export default async function handler(req: any, res: any) {
     })
 
     const answer = chat.choices?.[0]?.message?.content ?? 'Sorry, I could not generate a response.'
+
     return res.status(200).json({
       answer,
       sources: rows.map(r => r.source),
-      diag: { supabaseUrl, docCount, used, rowsLen: rows.length }
+      diag: { supabaseUrl, docCount, used, rowsLen: rows.length, probeLooseRows }
     })
   } catch (err: any) {
     return res.status(500).json({ error: 'Unhandled error', details: err?.message ?? String(err) })
