@@ -32,12 +32,18 @@ export default async function handler(req: any, res: any) {
     // 2) Retrieve top matches (RPC created earlier)
     const { data: rows, error } = await supabase.rpc('match_documents', {
       query_embedding: qvec,
-      match_count: 5,
-      sim_threshold: 0.72,
+      match_count: 8,
+      sim_threshold: 0.55,
     })
     if (error) {
       res.status(500).json({ error: 'Search failed', details: error.message })
       return
+    }
+    if (!rows?.length) {
+        return res.status(200).json({
+        answer: "No matching documents found in my knowledge base yet.",
+        sources: []
+    })
     }
 
     const context = (rows ?? [])
