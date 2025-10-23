@@ -49,8 +49,8 @@ export default async function handler(req: any, res: any) {
     {
       const { data, error } = await supabase.rpc('match_documents', {
         query_embedding: qvec,
-        match_count: 8,
-        sim_threshold: 0.45,
+        match_count: 10,
+        sim_threshold: 0,
       })
       if (error) {
         return res.status(500).json({ error: 'Search failed', details: error.message })
