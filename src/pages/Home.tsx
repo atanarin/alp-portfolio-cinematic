@@ -1,4 +1,5 @@
 import { motion } from 'framer-motion'
+import { Link } from 'react-router-dom'
 
 export default function Home() {
   return (
@@ -22,8 +23,8 @@ export default function Home() {
           Full‑stack and data‑driven projects with an eye for UX polish: real‑time systems, scalable pipelines, and delightful front‑ends.
         </motion.p>
         <div className="mt-6 flex gap-3 text-sm">
-          <a className="rounded-xl border border-white/10 bg-white/10 px-4 py-2 hover:shadow-glow" href="/projects">Explore Projects</a>
-          <a className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 hover:shadow-glow" href="/resume">View Résumé</a>
+          <Link className="rounded-xl border border-white/10 bg-white/10 px-4 py-2 hover:shadow-glow" to="/projects">Explore Projects</Link>
+          <Link className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 hover:shadow-glow" to="/resume">View Résumé</Link>
         </div>
       </section>
 
