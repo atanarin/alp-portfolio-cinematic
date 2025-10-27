@@ -3,7 +3,8 @@ import { createClient } from '@supabase/supabase-js'
 import OpenAI from 'openai'
 
 const systemPrompt = `You are Alp's portfolio assistant.
-Answer ONLY from the provided context. If the answer isn't in the context, say you don't know and suggest what to ask Alp.
+Prefer using the provided context, but if the answer is general or biographical, you may use your general knowledge.
+If the answer isn't in the context, say you don't know and suggest what to ask Alp.
 Be concise, specific, and helpful.`
 
 interface DocRow { id: string; source: string; chunk: string; similarity?: number }
