@@ -11,7 +11,7 @@ const url =
   process.env.POSTGRES_URL ||
   process.env.DATABASE_URL;
 
-if (!url) throw new Error('Missing Postgres URL in env');
+if (!url) throw new Error('Missing Postgres URL in env (POSTGRES_URL or DATABASE_URL)');
 
 const sql = neon(url);
 
@@ -20,7 +20,7 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 // Replace with your real transformed data
 const RAW_DOCS: { source: string; text: string }[] = [
-  { source: 'about.md',   text: `Alp is a CS + Computational Biology student ...` },
+  { source: 'about.md',    text: `Alp is a CS + Computational Biology student ...` },
   { source: 'project1.md', text: `Project: Fantasy Football app. Uses Flask/React, SSE, Redis ...` },
 ];
 
@@ -33,6 +33,7 @@ async function embed(texts: string[]): Promise<number[][]> {
 }
 
 async function ensureSchema() {
+  console.log('Ensuring extensions and table...');
   // Needed for gen_random_uuid()
   await sql`CREATE EXTENSION IF NOT EXISTS pgcrypto;`;
   await sql`CREATE EXTENSION IF NOT EXISTS vector;`;
@@ -46,12 +47,13 @@ async function ensureSchema() {
       created_at timestamptz DEFAULT now()
     );
   `;
-  // Optional: after you have some data, create ANN index for faster search
-  // (creating before inserts is okay, but it's typically better after initial load)
-  // await sql`CREATE INDEX IF NOT EXISTS docs_embedding_ivfflat ON docs USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);`;
 }
 
 async function main() {
+  // quick DB ping
+  const [{ now }] = await sql`SELECT NOW() AS now;`;
+  console.log('DB OK @', now);
+
   await ensureSchema();
 
   // Naive chunking
@@ -60,8 +62,10 @@ async function main() {
     return parts.map(p => ({ source, chunk: p }));
   });
 
+  console.log(`Embedding ${chunks.length} chunks...`);
   const embeddings = await embed(chunks.map(c => c.chunk));
 
+  console.log('Inserting...');
   for (let i = 0; i < chunks.length; i++) {
     const { source, chunk } = chunks[i];
     const v = `[${embeddings[i].join(',')}]`; // vector literal string
@@ -71,16 +75,14 @@ async function main() {
     `;
   }
 
-  // Analyze table stats; helps planner + ANN later
+  // Analyze table stats
   await sql`ANALYZE docs;`;
 
-  // Optional: create ANN index after load (uncomment if you want it now)
-  // await sql`CREATE INDEX IF NOT EXISTS docs_embedding_ivfflat ON docs USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);`;
-
-  console.log(`Inserted ${chunks.length} chunks.`);
+  const [{ count }] = await sql`SELECT COUNT(*)::int AS count FROM docs;` as any;
+  console.log(`Inserted ${chunks.length} chunks. Total rows now: ${count}.`);
 }
 
 main().catch(err => {
-  console.error(err);
+  console.error('INGEST ERROR:', err);
   process.exit(1);
 });
