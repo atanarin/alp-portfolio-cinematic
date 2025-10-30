@@ -1,61 +1,86 @@
 // scripts/ingest.ts
-import fs from 'node:fs/promises'
-import path from 'node:path'
-import { createClient } from '@supabase/supabase-js'
-import OpenAI from 'openai'
+import { config } from 'dotenv';
+config({ path: '.env.development.local' });  // local dev only
 
-const SUPABASE_URL = process.env.SUPABASE_URL!
-const SUPABASE_SERVICE_ROLE = process.env.SUPABASE_SERVICE_ROLE! // local only
-const EMBEDDING_MODEL = process.env.EMBEDDING_MODEL || 'text-embedding-3-small'
-const EMBEDDING_DIM = Number(process.env.EMBEDDING_DIM || 1536)
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY!
+import { neon } from '@neondatabase/serverless';
+import OpenAI from 'openai';
 
-const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE)
-const openai = new OpenAI({ apiKey: OPENAI_API_KEY })
+const url =
+  process.env.POSTGRES_URL_NON_POOLING ||
+  process.env.DATABASE_URL_NON_POOLING ||
+  process.env.POSTGRES_URL ||
+  process.env.DATABASE_URL;
 
-function chunkText(text: string, maxChars = 1800) {
-  const chunks: string[] = []
-  for (let i = 0; i < text.length; i += maxChars) {
-    chunks.push(text.slice(i, i + maxChars))
-  }
-  return chunks
+if (!url) throw new Error('Missing Postgres URL in env');
+
+const sql = neon(url);
+
+if (!process.env.OPENAI_API_KEY) throw new Error('Missing OPENAI_API_KEY');
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+// Replace with your real transformed data
+const RAW_DOCS: { source: string; text: string }[] = [
+  { source: 'about.md',   text: `Alp is a CS + Computational Biology student ...` },
+  { source: 'project1.md', text: `Project: Fantasy Football app. Uses Flask/React, SSE, Redis ...` },
+];
+
+async function embed(texts: string[]): Promise<number[][]> {
+  const resp = await openai.embeddings.create({
+    model: 'text-embedding-3-small', // 1536 dims
+    input: texts,
+  });
+  return resp.data.map(d => d.embedding);
 }
 
-async function embed(input: string) {
-  const res = await openai.embeddings.create({
-    model: EMBEDDING_MODEL,
-    input,
-  })
-  return res.data[0].embedding
-}
+async function ensureSchema() {
+  // Needed for gen_random_uuid()
+  await sql`CREATE EXTENSION IF NOT EXISTS pgcrypto;`;
+  await sql`CREATE EXTENSION IF NOT EXISTS vector;`;
 
-async function upsert(source: string, text: string) {
-  const chunks = chunkText(text)
-  for (const chunk of chunks) {
-    const embedding = await embed(chunk)
-    // optional: validate size
-    if (EMBEDDING_DIM && embedding.length !== EMBEDDING_DIM) {
-      throw new Error(`Embedding dim mismatch: got ${embedding.length}, expected ${EMBEDDING_DIM}`)
-    }
-    await supabase.from('documents').insert([{ source, chunk, embedding }])
-  }
-  console.log(`✓ ${source}: ${chunks.length} chunks`)
+  await sql/* sql */`
+    CREATE TABLE IF NOT EXISTS docs (
+      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+      source text,
+      chunk  text NOT NULL,
+      embedding vector(1536),
+      created_at timestamptz DEFAULT now()
+    );
+  `;
+  // Optional: after you have some data, create ANN index for faster search
+  // (creating before inserts is okay, but it's typically better after initial load)
+  // await sql`CREATE INDEX IF NOT EXISTS docs_embedding_ivfflat ON docs USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);`;
 }
 
 async function main() {
-  // Resume
-  const resume = await fs.readFile(path.join('data', 'resume.md'), 'utf8')
-  await upsert('resume', resume)
+  await ensureSchema();
 
-  // Projects
-  const projDir = path.join('data', 'projects')
-  const files = await fs.readdir(projDir)
-  for (const f of files) {
-    if (!f.endsWith('.md')) continue
-    const md = await fs.readFile(path.join(projDir, f), 'utf8')
-    await upsert(`project:${f.replace('.md','')}`, md)
+  // Naive chunking
+  const chunks = RAW_DOCS.flatMap(({ source, text }) => {
+    const parts = text.match(/[\s\S]{1,1200}/g) || [];
+    return parts.map(p => ({ source, chunk: p }));
+  });
+
+  const embeddings = await embed(chunks.map(c => c.chunk));
+
+  for (let i = 0; i < chunks.length; i++) {
+    const { source, chunk } = chunks[i];
+    const v = `[${embeddings[i].join(',')}]`; // vector literal string
+    await sql/* sql */`
+      INSERT INTO docs (source, chunk, embedding)
+      VALUES (${source}, ${chunk}, ${v}::vector);
+    `;
   }
-  console.log('✅ Ingest complete')
+
+  // Analyze table stats; helps planner + ANN later
+  await sql`ANALYZE docs;`;
+
+  // Optional: create ANN index after load (uncomment if you want it now)
+  // await sql`CREATE INDEX IF NOT EXISTS docs_embedding_ivfflat ON docs USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);`;
+
+  console.log(`Inserted ${chunks.length} chunks.`);
 }
 
-main().catch((e) => { console.error(e); process.exit(1) })
+main().catch(err => {
+  console.error(err);
+  process.exit(1);
+});
