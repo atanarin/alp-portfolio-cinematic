@@ -4,7 +4,7 @@ import OpenAI from 'openai';
 import { neon } from '@neondatabase/serverless';
 
 export const config = {
-  runtime: 'nodejs20.x', // be explicit on Vercel
+  runtime: 'nodejs', // be explicit on Vercel
 };
 
 const systemPrompt = `You are Alp's portfolio assistant.
