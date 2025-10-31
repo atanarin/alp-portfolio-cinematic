@@ -4,7 +4,7 @@ import OpenAI from 'openai';
 import { neon } from '@neondatabase/serverless';
 
 export const config = {
-  runtime: 'nodejs', // be explicit on Vercel
+  runtime: 'nodejs', // Node runtime on Vercel
 };
 
 const systemPrompt = `You are Alp's portfolio assistant.
@@ -14,16 +14,39 @@ Be concise, specific, and helpful.`;
 const EMBEDDING_MODEL = process.env.EMBEDDING_MODEL || 'text-embedding-3-small';
 const CHAT_MODEL = process.env.CHAT_MODEL || 'gpt-4o-mini';
 
+// --- helpers ---
+function cors(res: VercelResponse) {
+  // Only needed if your frontend is on a different domain; harmless otherwise
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, GET, OPTIONS');
+  res.setHeader('Cache-Control', 'no-store');
+}
+
 function parseBody(req: VercelRequest) {
   try {
     if (typeof req.body === 'string') return JSON.parse(req.body);
-    return req.body ?? {};
+    return (req.body ?? {}) as any;
   } catch {
-    return {};
+    return {} as any;
   }
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  cors(res);
+
+  // Preflight
+  if (req.method === 'OPTIONS') return res.status(204).end();
+
+  // Simple GET healthcheck so you can hit /api/chat in a browser
+  if (req.method === 'GET') {
+    return res.status(200).json({
+      ok: true,
+      route: '/api/chat',
+      note: 'POST { question: "...", threshold?: number, k?: number } to query.',
+    });
+  }
+
   try {
     if (req.method !== 'POST') {
       return res.status(405).json({ error: 'Method Not Allowed' });
@@ -47,11 +70,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ error: 'Missing question' });
     }
 
-    const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY! });
-    const sql = neon(process.env.POSTGRES_URL!); // include ?sslmode=require
+    // Quick path to prove frontend wiring
+    if (question === '__ping__') {
+      return res.status(200).json({
+        answer: 'pong',
+        sources: [],
+        diag: { ping: true, ts: new Date().toISOString() },
+      });
+    }
 
-    // Ping DB quickly (helps catch URL/SSL issues early)
-    const [{ now }] = await sql`SELECT NOW() as now;`.catch((e: any) => {
+    const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY! });
+    const sql = neon(process.env.POSTGRES_URL!); // include ?sslmode=require in the URL
+
+    // DB ping
+    const [{ now }] = await sql`SELECT NOW() AS now;`.catch((e: any) => {
       console.error('DB ping failed:', e);
       throw new Error('Database connection failed: ' + (e?.message || e));
     });
@@ -64,12 +96,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         console.error('Embedding error:', e);
         throw new Error('Embedding failed: ' + (e?.message || e));
       });
+
     const qvec = emb.data?.[0]?.embedding;
     if (!qvec?.length) {
       return res.status(500).json({ error: 'No embedding returned from OpenAI' });
     }
 
-    // 2) Retrieve from Neon
+    // 2) Retrieve from Neon (cosine distance)
     const THRESHOLD = typeof body?.threshold === 'number' ? body.threshold : 0.45;
     const LIMIT = typeof body?.k === 'number' ? body.k : 8;
 
@@ -83,9 +116,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       `) as any;
     } catch (e: any) {
       console.error('Retrieval SQL error:', e);
-      return res
-        .status(500)
-        .json({ error: 'Retrieval failed', details: e?.message || String(e) });
+      return res.status(500).json({ error: 'Retrieval failed', details: e?.message || String(e) });
     }
 
     const hits = (rows || []).filter(r => typeof r.distance === 'number' && r.distance <= THRESHOLD);
